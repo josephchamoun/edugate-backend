@@ -15,34 +15,53 @@ use Illuminate\Validation\Rule;
 
 class AuthController extends Controller
 {
-   public function login(Request $request)
-{
-    $request->validate([
+    public function login(Request $request)
+    {
+        $request->validate([
         'email' => 'required|email',
         'password' => 'required',
-    ]);
+        ]);
 
-    $user = User::where('email', $request->email)->first();
 
-    if (! $user || ! Hash::check($request->password, $user->password)) {
+        $user = User::where('email', $request->email)->first();
+
+
+        if (! $user || ! Hash::check($request->password, $user->password)) {
         return response()->json(['message' => 'Invalid credentials'], 401);
-    }
+        }
 
-    $token = $user->createToken('auth_token')->plainTextToken;
 
-    $user->load(match ($user->role) {
+        // Delete old tokens (optional but recommended)
+        $user->tokens()->delete();
+
+
+        // Create token
+        $token = $user->createToken('auth_token')->plainTextToken;
+
+
+        // Load role-based relation
+        $user->load(match ($user->role) {
         'student' => 'student',
         'teacher' => 'teacher',
-        'parent'  => 'parentProfile',
-        default   => [],
-    });
+        'parent' => 'parentProfile',
+        default => [],
+        });
 
-    return response()->json([
-        'access_token' => $token,
-        'token_type' => 'Bearer',
-        'user' => $user,
-    ]);
-}
+
+        return response()
+        ->json([
+        'user' => $user, 
+        ])
+        ->cookie(
+        'access_token',
+        $token,
+        60 * 24, // minutes (1 day)
+        '/',
+        null,
+        false, // 🔴 false for local dev (true in production HTTPS)
+        true // ✅ HttpOnly
+        );
+    }
 
     public function register(Request $request)
     {
@@ -75,14 +94,23 @@ class AuthController extends Controller
 
     public function logout(Request $request)
     {
+        // Revoke current token
         $request->user()->currentAccessToken()->delete();
-        return response()->json(['message' => 'Logged out']);
+
+
+        // Remove the HttpOnly cookie
+        return response()
+        ->json(['message' => 'Logged out'])
+        ->withoutCookie('access_token');
     }
 
-    public function me(Request $request)
-    {
-        return response()->json($request->user()->load(['student', 'teacher', 'parent']));
-    }
+public function me(Request $request)
+{
+    return response()->json([
+        'user' => $request->user(),
+        'guard' => Auth::getDefaultDriver(),
+    ]);
+}
 
     public function updateProfile(Request $request)
     {
